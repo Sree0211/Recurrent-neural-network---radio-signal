@@ -1,0 +1,126 @@
+#Cosmic Radio Showerss with signals
+
+import numpy as np
+import matplotlib.pyplot as plt
+import sys 
+import os
+import random
+import keras
+from keras.models import Sequential
+import keras.layers as layers
+import tensorflow as tf
+
+folder = 'train-radiotrace' #folder for training results
+if not os.path.exists(folder):
+    os.makedirs(folder)
+
+#load data and figure out its shape
+data = np.load("cosmic-radio-showers_with_signals.npz")
+print('data names',data.files)
+
+print('shape traces',np.shape(data['traces']),'shape signals',np.shape(data['signals']))
+print('shape signal',np.shape(data['signals'][1]))
+
+#plot examplary trace and signal
+
+i=40
+plt.plot(np.arange(0,len(data['trace'][i],1),data['traces'][i],label='traces'))
+plt.plot(np.arange(0,len(data['signals'][i],1),data['signals'][i],label='signals'))
+plt.xlabel('time/a.u.')
+plt.ylabel('amplitude/a.u.')
+plt.legen()
+plt.show()
+
+print('ii')
+print('Formation data:')
+print('-add truth bit \n-set training,validation and test data\n-join and mix signals and -split data from the truth bit')
+
+#Add truth bit
+sig_bit=np.concatenate((data['signals'],np.ones((50000,1))),axis=1)
+tra_bit=np.concatenate((data['traces'],np.zeros((50000,1))),axis=1)
+print('shape traces + truth bit:',np.shape(sig_bit),', shape signals + truth bit:',np.shape(tra_bit))
+
+#setting training validation and test data
+g=1000
+gfit = g
+gval = g+gfit
+gpre = gfit+gval+g
+
+#join and mix signals and traces
+fit_data_g = np.concatenate((sig_bit,tra_bit),axis=0)
+np.random.shuffle(fit_data_g)
+
+#split data from truth bit
+fit_data = np.reshape(fit_data_g[:gfit,0:-1],(-1,500,1))
+fit_true = fir_data_g[:gfit,-1:]
+val_data = np.reshape(fit_data_g[gfit:gval,0:-1],(-1,500,1))
+val_true = fit_data_g[gfit:gval,-1:]
+pre_data = np.reshape(fit_data_g[gval:gpre,0:-1],(-1,500,1))
+pre_true = fit_data_g[gval:gpre,-1:]
+
+#to use all data uncomment this:
+
+#pre_data = np.reshape(fit_data_g[gval:,0:-1],(-1,500,1))
+#pre_trust = fit_data[gval:,-1:]
+
+print('shape training data:',np.shape(fit_data),', shape training target:',np.shape(fit_true))
+print('training data shape for model:',np.shape(np.reshape(fit_data,(-1,500,1))))
+
+print('set up model \n')
+
+model = keras.models.Sequential()
+model.add(layers.Bidirectional(LSTM(32,return_sequences=True),input_shape=(500,1)))
+model.add(layers.Bidirectional(LSTM(64,return_sequences=True)))
+model.add(layers.Bidirectional(LSTM(10,return_sequences=True)))
+model.add(layers.Flatten())
+model.add(layers.Dropout(0.3))
+model.add(layers.Dense(1,activation="sigmoid"))
+
+model.summary()
+
+
+opt =  optimizers.Adam(1e-3, decay = 0.00008)
+model.compile(loss = 'binary_crossentropy', optimizer = opt, metrics = ['accuracy'])
+
+#model.fit()
+print('\n fit model(might take some time)\n')
+bs=120
+epoch=40
+result = model.fit(fit_data,fit_true,batch_size=bs,epochs=epoch,verbose=1,validation_data=(val_data,val_true),
+                  callbacks=[keras.callbacks.CSVLogger(folder +'/history.csv')])
+
+model.save(folder+'/model1.h5')
+
+#Evaluation and plots
+
+print('\nModel performance (loss,accuracy)')
+print('Train: %.4f, %.4f'% tuple(model.evaluate(fit_data,fit_true,verbose=0,batch_size=10)))
+print('Valid: %.4f, %.4f'% tuple(model.evaluate(val_data,val_true,verbose=0,batch_size=10)))
+print('Test:  %.4f, %.4f'% tuple(model.evaluate(pre_data,pre_true,verbose=0,batch_size=10)))
+
+#training curves
+history = np.genfrontxt(folder+'/history.csv',delimiter=',',names=True)
+
+fig,ax = plt.subplots(1)
+ax.plot(history['epoch'],history['loss'],label='training')
+ax.plot(history['epoch'],history['val_loss'],label='validation')
+ax.legend()
+
+ax.set(xlabel='epoch',ylabel='loss')
+fig.savefig(folder+'/accuracy.png')
+
+
+#confusion matrix
+#Y_predict = model.predict(pre_data,batch_size=128)
+#Y_true = np.argmax(pre_true,axis=1)
+
+print('\nlet model predict\n')
+Y_predict = np.array(model.predict(pre_data,batch_size=128))
+Y_true=np.array(pre_true)
+
+#get right shape for histogram
+Y_predict = np.square(Y_predict.T)
+Y_true=np.squeeze(Y_true.T)
+print('get right shape for histogram:')
+print('predicted values',np.shape(Y_predict))
+print('target values',np.shape(Y_true))
